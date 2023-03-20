@@ -3,27 +3,52 @@ import pandas as pd
 import numpy as np
 from sklearn.model_selection import train_test_split
 
-
-# Load the tables
-ben_cols=['DESYNPUF_ID', 'SP_RA_OA', 'BENE_BIRTH_DT', 'BENE_SEX_IDENT_CD']
+ben_path = "data/cms/ben.csv"
+ip_path = "data/cms/ip.csv"
+pde_path = "data/cms/pde.csv"
+dx_path = "data/cms/dx.csv"
+pcs_path = "data/cms/pcs.csv"
+ben_cols = ['DESYNPUF_ID', 'SP_RA_OA', 'BENE_BIRTH_DT', 'BENE_SEX_IDENT_CD']
 ip_cols=['DESYNPUF_ID','CLM_FROM_DT','CLM_ID','CLM_DRG_CD','ICD9_DGNS_CD_1','ICD9_DGNS_CD_2',
         'ICD9_DGNS_CD_3','ICD9_DGNS_CD_4','ICD9_DGNS_CD_5','ICD9_DGNS_CD_6','ICD9_DGNS_CD_7',
         'ICD9_DGNS_CD_8','ICD9_DGNS_CD_9','ICD9_DGNS_CD_10','ICD9_PRCDR_CD_1','ICD9_PRCDR_CD_2',
         'ICD9_PRCDR_CD_3','ICD9_PRCDR_CD_4','ICD9_PRCDR_CD_5','ICD9_PRCDR_CD_6']
 pde_cols=['DESYNPUF_ID', 'PROD_SRVC_ID']
 
-# rows = 100000
-
-ben = pd.read_csv("data/cms/ben.csv",
-                  usecols=ben_cols)
-ip = pd.read_csv("data/cms/ip.csv",
-                 usecols=ip_cols)
-# pde = pd.read_csv("data/cms/pde.csv",
-#                   usecols=pde_cols)
-dx = pd.read_csv("data/cms/dx.csv")
-pcs = pd.read_csv("data/cms/pcs.csv")
-
+# rows=10000
 col_num = 6
+dx_cols = (col_num+3, col_num+13)
+pcs_cols = (col_num+13, col_num+19)
+target_col = 'CLM_DRG_CD'
+
+
+# Load the tables
+def load_tables(ben_path, ip_path, pde_path, dx_path, pcs_path, ben_cols, ip_cols, pde_cols):
+    
+    """
+    Load tables from CSV files and return pandas dataframes
+    
+    Parameters:
+    ben_path (str): File path of the ben CSV file
+    ip_path (str): File path of the ip CSV file
+    pde_path (str): File path of the pde CSV file
+    dx_path (str): File path of the dx CSV file
+    pcs_path (str): File path of the pcs CSV file
+    ben_cols (list): List of column names to use for the ben table
+    ip_cols (list): List of column names to use for the ip table
+    pde_cols (list): List of column names to use for the pde table
+    
+    Returns:
+    tuple: A tuple containing pandas dataframes for the ben, ip, pde, dx, and pcs tables
+    """
+    
+    ben = pd.read_csv(ben_path, usecols=ben_cols)
+    ip = pd.read_csv(ip_path, usecols=ip_cols)
+    pde = pd.read_csv(pde_path, usecols=pde_cols)
+    dx = pd.read_csv(dx_path)
+    pcs = pd.read_csv(pcs_path)
+    
+    return ben, ip, pde, dx, pcs
 
 
 def get_arthritis_patient_data(beneficiaries_df, inpatient_df, start_year, end_year):
@@ -181,11 +206,6 @@ def split_data(data, dx_dict, pcs_dict, dx_cols_indices, pcs_cols_indices, targe
     return x_data, y_data
 
 
-dx_cols = (col_num+3, col_num+13)
-pcs_cols = (col_num+13, col_num+19)
-target_col = 'CLM_DRG_CD'
-
-
 def binarize_categorical_columns(data, start_col_index, end_col_index, icd9_to_ccs_dict):
     """
     Binarize the categorical variables in a pandas DataFrame into a one-hot encoded numpy array.
@@ -261,6 +281,7 @@ def aggregate_occurrence_vector_encoding(data, start_col_index):
     # Get the names of all code columns
     code_columns = list(data.columns[start_col_index:end_col_index])
     code_columns[:0] = ['Age', 'BENE_SEX_IDENT_CD']
+    end_col_index += 2
     # Group the data by DESYNPUF_ID and Year, and aggregate the maximum value of each code column
     data_grouped = data.groupby(['DESYNPUF_ID', 'Year'], as_index=False)[code_columns].agg('max')
     # Get the data for the target variable, CLM_DRG_CD
@@ -269,21 +290,20 @@ def aggregate_occurrence_vector_encoding(data, start_col_index):
     rows_per_sample = 3
     flattened_code_columns = np.concatenate([data_grouped.iloc[i:i+rows_per_sample, 2:end_col_index].values.flatten() 
                                               for i in range(0, len(data_grouped), rows_per_sample)])
-    print(flattened_code_columns.shape)
     x_input = flattened_code_columns.reshape(-1, len(code_columns) * rows_per_sample)
     # Prepare the y_input by selecting the values of CLM_DRG_CD for Year equal to 2010
-    y_input = data_target.loc[data_target['Year'] == '2010', 'CLM_DRG_CD'].values
-    
+    y_input = data_target.loc[data_target['Year'] == 2010, 'CLM_DRG_CD'].values
+    print(np.shape(y_input))
     return x_input, y_input
 
 
-def multi_hot_encoding(rows, data, start_col):
+def multi_hot_encoding(rows, data, start_col_index):
     """
     Encode the data in a multi-hot format for input into a model
     
     Parameters:
     data (pandas.DataFrame): The input data
-    start_col (int): The start column index of the Code columns
+    start_col_index (int): The start column index of the Code columns
     
     Returns:
     tuple: A tuple containing the x_input and y_input for the model
@@ -306,12 +326,12 @@ def multi_hot_encoding(rows, data, start_col):
     end_col = data.shape[1]
     
     # Prepare the x_input by encoding the Code columns in a multi-hot format
-    matrix_shape = data.iloc[:, start_col:-1].shape
+    matrix_shape = data.iloc[:, start_col_index:-1].shape
     x = np.zeros((matrix_shape[0],366,matrix_shape[-1]))
 
     for record in range(data.shape[0]):
       try:
-          x[record][(data['DayOfYear'].iloc[record])-1] = data.iloc[record, start_col:-1].values
+          x[record][(data['DayOfYear'].iloc[record])-1] = data.iloc[record, start_col_index:-1].values
       except Exception as e:
           print(f"Error occurred at record {record}: {e}")
 
@@ -323,9 +343,11 @@ def multi_hot_encoding(rows, data, start_col):
 
 
 # This function takes several arguments, including beneficiary data, inpatient data, diagnosis and procedure tables, and start and end years
-def get_aov(beneficiaries_df=ben, inpatient_df=ip, dx = dx, pcs= pcs, start_year=2008, end_year=2010, random_state = 42):
+def get_aov(ben_path, ip_path, pde_path, dx_path, pcs_path, ben_cols, ip_cols, pde_cols, start_year=2008, end_year=2010, random_state = 42, col_num=6):
+    # Load the data tables
+    ben, ip, pde, dx, pcs = load_tables(ben_path, ip_path, pde_path, dx_path, pcs_path, ben_cols, ip_cols, pde_cols)
     # First, it gets arthritis patient data using the beneficiary and inpatient data for the specified time period
-    data = get_arthritis_patient_data(beneficiaries_df=ben, inpatient_df=ip, start_year=2008, end_year=2010)
+    data = get_arthritis_patient_data(beneficiaries_df=ben, inpatient_df=ip, start_year=start_year, end_year=end_year)
     # It then processes the diagnosis and procedure tables to create dictionaries of codes
     dx_dict, dx_codes, pcs_dict, pcs_codes = process_diagnosis_and_procedure_tables(dx, pcs)
     # The data is split into input data (x_data) and target data (y_data) based on the diagnosis and procedure codes
@@ -336,17 +358,21 @@ def get_aov(beneficiaries_df=ben, inpatient_df=ip, dx = dx, pcs= pcs, start_year
     # The binarized data is combined with the original data to create a processed dataframe
     processed_data = create_code_dataframe(x_data, dxb, pcsb, y_data)
     # The data is multi-hot encoded and split into training and testing sets
-    input_data , target_data = aggregate_occurrence_vector_encoding(data = processed_data, start_col_index = col_num-4)
+    input_data , target_data = aggregate_occurrence_vector_encoding(data = processed_data, start_col_index = col_num+1)
+    input_data = input_data.astype('float32')
+    target_data = target_data.astype('float32')
     train_input, test_input, train_target, test_target = train_test_split(input_data,
                     target_data, test_size=0.2, stratify=target_data, random_state= random_state)
     # The training and testing data is returned
-    return train_input.astype('float32'), test_input.astype('float32'), train_target.astype('float32'), test_target.astype('float32')
+    return train_input, test_input, train_target, test_target
 
 
 # This function takes several arguments, including beneficiary data, inpatient data, diagnosis and procedure tables, and start and end years
-def get_mhe(beneficiaries_df=ben, inpatient_df=ip, dx = dx, pcs= pcs, start_year=2008, end_year=2010, rows = 10000, random_state = 42):
+def get_mhe(ben_path, ip_path, pde_path, dx_path, pcs_path, ben_cols, ip_cols, pde_cols, rows=10000, start_year=2008, end_year=2010, random_state = 42, col_num=6):
+    # Load the data tables
+    ben, ip, pde, dx, pcs = load_tables(ben_path, ip_path, pde_path, dx_path, pcs_path, ben_cols, ip_cols, pde_cols)
     # First, it gets arthritis patient data using the beneficiary and inpatient data for the specified time period
-    data = get_arthritis_patient_data(beneficiaries_df=ben, inpatient_df=ip, start_year=2008, end_year=2010)
+    data = get_arthritis_patient_data(beneficiaries_df=ben, inpatient_df=ip, start_year=start_year, end_year=end_year)
     # It then processes the diagnosis and procedure tables to create dictionaries of codes
     dx_dict, dx_codes, pcs_dict, pcs_codes = process_diagnosis_and_procedure_tables(dx, pcs)
     # The data is split into input data (x_data) and target data (y_data) based on the diagnosis and procedure codes
@@ -357,10 +383,15 @@ def get_mhe(beneficiaries_df=ben, inpatient_df=ip, dx = dx, pcs= pcs, start_year
     # The binarized data is combined with the original data to create a processed dataframe
     processed_data = create_code_dataframe(x_data, dxb, pcsb, y_data)
     # The data is multi-hot encoded and split into training and testing sets
-    input_data , target_data, dv = multi_hot_encoding(rows, data = processed_data, start_col = col_num+1)
+    input_data , target_data, dv = multi_hot_encoding(rows, data = processed_data, start_col_index = col_num+1)
+    input_data = input_data.astype('float32')
+    target_data = target_data.astype('float32')
+    dv = dv.astype('float32')
     train_input, test_input, train_target, test_target = train_test_split(input_data,
                     target_data, test_size=0.2, stratify=target_data, random_state= random_state)
     train_dv, test_dv, _, __ = train_test_split(dv,
                     target_data, test_size=0.2, stratify=target_data, random_state= random_state)
+    x_train, x_val, y_train, y_val = train_test_split(train_input, train_target, test_size=0.2, stratify=train_target, random_state=42)
+    dv_train, dv_val, _, __ = train_test_split(train_dv,train_target, test_size=0.2, stratify=train_target, random_state= 42)
     # The training and testing data is returned
-    return train_input.astype('float32'), test_input.astype('float32'), train_target.astype('float32'), test_target.astype('float32'), train_dv.astype('float32'), test_dv.astype('float32')
+    return x_train, x_val, y_train, y_val, dv_train, dv_val, test_input, test_dv, test_target
