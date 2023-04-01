@@ -17,6 +17,20 @@ ORX is interested in developing machine learning models based on insurance claim
 
 #### Todo
 
+## Requirements
+
+| Package        | Version   |
+| -------------- | --------- |
+| Pandas         | 1.5.3     |
+| Numpy          | 1.23.5    |
+| Seaborn        | 0.12.2    |
+| Matplotlib     | 3.7.1     |
+| Sklearn        | 1.2.2     |
+| Scipy          | 1.10.1    |
+| Keras          | 2.11.0    |
+| Tensorflow     | 2.11.0    |
+
+
 ## Usage
 
 #### Todo
